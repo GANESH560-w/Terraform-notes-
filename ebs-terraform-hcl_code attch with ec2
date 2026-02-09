@@ -1,0 +1,62 @@
+
+
+# ebs attachment  :- 
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = <"ap-south-1">   # change region if needed
+}
+
+# -----------------------------
+# EC2 Instance
+# -----------------------------
+resource "aws_instance" "devops_ec2" {
+  ami           = <"ami-0f5ee92e2d63afc18">   # Amazon Linux 2 (example)
+  instance_type = <"t2.micro">
+  availability_zone = <"ap-south-1a">
+
+  tags = {
+    Name        = <"devops-ec2">
+    Environment = <"production">
+  }
+}
+
+# -----------------------------
+# EBS Volume
+# -----------------------------
+resource "aws_ebs_volume" "devops_ebs" {
+  availability_zone = <"ap-south-1a">
+-
+  size        = <30>          # changed from default 20 → 30 GB
+  type        = <"gp3">       # changed from gp2 → gp3
+  iops        = <3000>        # gp3 feature
+  throughput = <125>         # gp3 feature
+
+  tags = {
+    Name        = <"devops-ebs-volume">
+    Environment = <"production">
+  }
+}
+
+# -----------------------------
+# Attach EBS to EC2
+# -----------------------------
+resource "aws_volume_attachment" "ebs_attach" {
+  device_name = <"/dev/xvdf">
+  volume_id   = aws_ebs_volume.devops_ebs.id
+  instance_id = aws_instance.devops_ec2.id
+}
+
+
+
+
+
+
+
