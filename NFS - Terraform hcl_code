@@ -1,0 +1,117 @@
+provider "aws" {
+  region = <"ap-south-1">
+}
+
+# -----------------------------
+# VPC (default)
+# -----------------------------
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnet_ids" "default" {
+  vpc_id = data.aws_vpc.default.id
+}
+
+# -----------------------------
+# Security Group for EC2 + NFS
+# -----------------------------
+resource "aws_security_group" "nfs_sg" {
+  name        = <"nfs-sg">
+  description = "Allow SSH and NFS"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = <["0.0.0.0/0"]>
+  }
+
+  ingress {
+    description = "NFS"
+    from_port   = 2049
+    to_port     = 2049
+    protocol    = "tcp"
+    cidr_blocks = <["0.0.0.0/0"]>
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = <"nfs-security-group">
+  }
+}
+
+# -----------------------------
+# EC2 Instance
+# -----------------------------
+resource "aws_instance" "nfs_ec2" {
+  ami           = <"ami-0f5ee92e2d63afc18">   # Amazon Linux 2 (example)
+  instance_type = <"t2.micro">
+
+  subnet_id              = element(data.aws_subnet_ids.default.ids, 0)
+  vpc_security_group_ids = [aws_security_group.nfs_sg.id]
+
+  user_data = <<-EOF
+              #!/bin/bash
+              yum install -y amazon-efs-utils nfs-utils
+              mkdir -p /mnt/nfs
+              EOF
+
+  tags = {
+    Name = <"nfs-ec2">
+  }
+}
+
+# -----------------------------
+# EFS (NFS File System)
+# -----------------------------
+resource "aws_efs_file_system" "nfs" {
+  creation_token = <"nfs-efs">
+
+  encrypted = <true>
+
+  tags = {
+    Name = <"nfs-efs">
+  }
+}
+
+# -----------------------------
+# EFS Mount Target
+# -----------------------------
+resource "aws_efs_mount_target" "nfs_mt" {
+  file_system_id  = aws_efs_file_system.nfs.id
+  subnet_id       = element(data.aws_subnet_ids.default.ids, 0)
+  security_groups = [aws_security_group.nfs_sg.id]
+}
+
+# -----------------------------
+# Mount NFS on EC2
+# -----------------------------
+resource "null_resource" "mount_nfs" {
+  depends_on = [
+    aws_efs_mount_target.nfs_mt,
+    aws_instance.nfs_ec2
+  ]
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo mount -t efs ${aws_efs_file_system.nfs.id}:/ /mnt/nfs",
+      "echo '${aws_efs_file_system.nfs.id}:/ /mnt/nfs efs defaults,_netdev 0 0' | sudo tee -a /etc/fstab"
+    ]
+
+    connection {
+      type        = "ssh"
+      user        = <"ec2-user">
+      private_key = file(<"~/.ssh/id_rsa">)
+      host        = aws_instance.nfs_ec2.public_ip
+    }
+  }
+}
