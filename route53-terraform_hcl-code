@@ -1,0 +1,51 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = <"~> 5.0">
+    }
+  }
+}
+
+provider "aws" {
+  region = <"ap-south-1">
+}
+
+# =====================================================
+# Route 53 Public Hosted Zone
+# =====================================================
+resource "aws_route53_zone" "public_zone" {
+  name = <"example.com">
+
+  tags = {
+    Name = <"example-public-zone">
+  }
+}
+
+# =====================================================
+# Application Load Balancer (Target)
+# =====================================================
+resource "aws_lb" "alb" {
+  name               = <"demo-alb">
+  load_balancer_type = "application"
+  subnets            = <["subnet-aaa", "subnet-bbb"]>
+
+  tags = {
+    Name = <"demo-alb">
+  }
+}
+
+# =====================================================
+# Route 53 Record → ALB
+# =====================================================
+resource "aws_route53_record" "alb_record" {
+  zone_id = aws_route53_zone.public_zone.zone_id
+  name    = <"www.example.com">
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.alb.dns_name
+    zone_id                = aws_lb.alb.zone_id
+    evaluate_target_health = <true>
+  }
+}
