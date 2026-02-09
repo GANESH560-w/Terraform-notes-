@@ -1,0 +1,144 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = <"ap-south-1">
+}
+
+# -----------------------------
+# S3 Bucket
+# -----------------------------
+resource "aws_s3_bucket" "static_site" {
+  bucket = <"my-static-website-ganesh-123">
+  
+  tags = {
+    Name        = <"static-website-bucket">
+    Environment = <"production">
+  }
+}
+
+# -----------------------------
+# Disable Public Access Block
+# (Required for static website)
+# -----------------------------
+resource "aws_s3_bucket_public_access_block" "public_access" {
+  bucket = aws_s3_bucket.static_site.id
+
+  block_public_acls       = <false>
+  block_public_policy     = <false>
+  ignore_public_acls      = <false>
+  restrict_public_buckets = <false>
+}
+
+# -----------------------------
+# Bucket Ownership
+# -----------------------------
+resource "aws_s3_bucket_ownership_controls" "ownership" {
+  bucket = aws_s3_bucket.static_site.id
+
+  rule {
+    object_ownership = <"BucketOwnerPreferred">
+  }
+}
+
+# -----------------------------
+# Enable Versioning
+# -----------------------------
+resource "aws_s3_bucket_versioning" "versioning" {
+  bucket = aws_s3_bucket.static_site.id
+
+  versioning_configuration {
+    status = <"Enabled">
+  }
+}
+
+# -----------------------------
+# Server Side Encryption
+# -----------------------------
+resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
+  bucket = aws_s3_bucket.static_site.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = <"AES256">
+    }
+  }
+}
+
+# -----------------------------
+# Lifecycle Policy
+# -----------------------------
+resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
+  bucket = aws_s3_bucket.static_site.id
+
+  rule {
+    id     = <"log-cleanup">
+    status = <"Enabled">
+
+    transition {
+      days          = <30>
+      storage_class = <"STANDARD_IA">
+    }
+
+    expiration {
+      days = <365>
+    }
+  }
+}
+
+# -----------------------------
+# Static Website Configuration
+# -----------------------------
+resource "aws_s3_bucket_website_configuration" "website" {
+  bucket = aws_s3_bucket.static_site.id
+
+  index_document {
+    suffix = <"index.html">
+  }
+
+  error_document {
+    key = <"error.html">
+  }
+}
+
+# -----------------------------
+# Bucket Policy (Public Read)
+# -----------------------------
+resource "aws_s3_bucket_policy" "public_policy" {
+  bucket = aws_s3_bucket.static_site.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = ["s3:GetObject"]
+        Resource  = ["${aws_s3_bucket.static_site.arn}/*"]
+      }
+    ]
+  })
+}
+
+# -----------------------------
+# Upload Website Files
+# -----------------------------
+resource "aws_s3_object" "index" {
+  bucket       = aws_s3_bucket.static_site.id
+  key          = <"index.html">
+  source       = <"./index.html">
+  content_type = <"text/html">
+}
+
+resource "aws_s3_object" "error" {
+  bucket       = aws_s3_bucket.static_site.id
+  key          = <"error.html">
+  source       = <"./error.html">
+  content_type = <"text/html">
+}
