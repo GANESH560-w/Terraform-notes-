@@ -1,0 +1,123 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = <"~> 5.0">
+    }
+  }
+}
+
+provider "aws" {
+  region = <"ap-south-1">
+}
+
+# -----------------------------
+# Launch Template
+# -----------------------------
+resource "aws_launch_template" "asg_lt" {
+  name_prefix   = <"asg-lt-">
+  image_id      = <"ami-0f5ee92e2d63afc18">
+  instance_type = <"t2.micro">
+
+  user_data = base64encode(<<-EOF
+              #!/bin/bash
+              yum install -y httpd
+              systemctl start httpd
+              systemctl enable httpd
+              echo "Auto Scaling EC2" > /var/www/html/index.html
+              EOF
+  )
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = <"asg-ec2">
+    }
+  }
+}
+
+# -----------------------------
+# Auto Scaling Group
+# -----------------------------
+resource "aws_autoscaling_group" "asg" {
+  name = <"my-asg">
+
+  min_size         = <1>
+  max_size         = <3>
+  desired_capacity = <1>
+
+  vpc_zone_identifier = <["subnet-xxxxxxxx"]>  # replace with subnet ID
+
+  launch_template {
+    id      = aws_launch_template.asg_lt.id
+    version = "$Latest"
+  }
+
+  tag {
+    key                 = "Name"
+    value               = <"auto-scaled-ec2">
+    propagate_at_launch = true
+  }
+}
+
+# -----------------------------
+# Scale Out Policy
+# -----------------------------
+resource "aws_autoscaling_policy" "scale_out" {
+  name                   = <"scale-out-policy">
+  autoscaling_group_name = aws_autoscaling_group.asg.name
+  adjustment_type        = "ChangeInCapacity"
+  scaling_adjustment     = <1>
+  cooldown               = <300>
+}
+
+# -----------------------------
+# Scale In Policy
+# -----------------------------
+resource "aws_autoscaling_policy" "scale_in" {
+  name                   = <"scale-in-policy">
+  autoscaling_group_name = aws_autoscaling_group.asg.name
+  adjustment_type        = "ChangeInCapacity"
+  scaling_adjustment     = <-1>
+  cooldown               = <300>
+}
+
+# -----------------------------
+# CloudWatch Alarm – High CPU
+# -----------------------------
+resource "aws_cloudwatch_metric_alarm" "cpu_high" {
+  alarm_name          = <"cpu-high">
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = <2>
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = <120>
+  statistic           = "Average"
+  threshold           = <70>
+
+  alarm_actions = [aws_autoscaling_policy.scale_out.arn]
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.asg.name
+  }
+}
+
+# -----------------------------
+# CloudWatch Alarm – Low CPU
+# -----------------------------
+resource "aws_cloudwatch_metric_alarm" "cpu_low" {
+  alarm_name          = <"cpu-low">
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = <2>
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = <120>
+  statistic           = "Average"
+  threshold           = <30>
+
+  alarm_actions = [aws_autoscaling_policy.scale_in.arn]
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.asg.name
+  }
+}
